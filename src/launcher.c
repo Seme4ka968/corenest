@@ -13,9 +13,19 @@
 #include "audio.h"
 #include "input.h"
 
+#ifdef _WIN32
+  #include <direct.h>
+  #define CHDIR _chdir
+#else
+  #include <unistd.h>
+  #define CHDIR chdir
+#endif
+
 static core_api_t g_core;
 static int g_running = 1;
 static enum retro_pixel_format g_fmt = RETRO_PIXEL_FORMAT_0RGB1555;
+
+static char g_root[1024] = ".";
 
 static void cb_video(const void *data, unsigned w, unsigned h, size_t pitch) {
     if (!data) { video_present(); return; }
@@ -64,6 +74,18 @@ static char *dup_str(const char *s) {
     return p;
 }
 
+static int dir_exists(const char *path) {
+    DIR *d = opendir(path);
+    if (d) { closedir(d); return 1; }
+    return 0;
+}
+
+static int file_exists(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (f) { fclose(f); return 1; }
+    return 0;
+}
+
 static char *find_first(const char *dir, const char *ext) {
     DIR *d = opendir(dir);
     if (!d) return NULL;
@@ -85,9 +107,36 @@ static char *find_first(const char *dir, const char *ext) {
     return result;
 }
 
-static int file_exists(const char *path) {
-    FILE *f = fopen(path, "rb");
-    if (f) { fclose(f); return 1; }
+static char *find_in_roots(const char *subdir, const char *ext) {
+    char path[1200];
+
+    snprintf(path, sizeof(path), "%s/%s", g_root, subdir);
+    char *r = find_first(path, ext);
+    if (r) return r;
+
+    snprintf(path, sizeof(path), "%s", subdir);
+    r = find_first(path, ext);
+    if (r) return r;
+
+    snprintf(path, sizeof(path), "../%s", subdir);
+    r = find_first(path, ext);
+    if (r) return r;
+
+    return NULL;
+}
+
+static int file_exists_in_roots(const char *subdir, const char *name) {
+    char path[1200];
+
+    snprintf(path, sizeof(path), "%s/%s/%s", g_root, subdir, name);
+    if (file_exists(path)) return 1;
+
+    snprintf(path, sizeof(path), "%s/%s", subdir, name);
+    if (file_exists(path)) return 1;
+
+    snprintf(path, sizeof(path), "../%s/%s", subdir, name);
+    if (file_exists(path)) return 1;
+
     return 0;
 }
 
@@ -108,15 +157,67 @@ static const char *pixel_format_name(enum retro_pixel_format fmt) {
     }
 }
 
+/* Находим корень проекта:
+   1. Рядом с .exe (SDL_GetBasePath)
+   2. Текущая директория
+   3. Родительская (../)
+*/
+static void find_root(void) {
+    char *base = SDL_GetBasePath();
+    if (base) {
+        size_t len = strlen(base);
+        if (len > 1 && (base[len-1] == '/' || base[len-1] == '\\'))
+            base[len-1] = 0;
+
+        char test[1200];
+        snprintf(test, sizeof(test), "%s/../cores", base);
+        if (dir_exists(test)) {
+            snprintf(g_root, sizeof(g_root), "%s/..", base);
+            SDL_free(base);
+            return;
+        }
+
+        snprintf(test, sizeof(test), "%s/cores", base);
+        if (dir_exists(test)) {
+            snprintf(g_root, sizeof(g_root), "%s", base);
+            SDL_free(base);
+            return;
+        }
+        SDL_free(base);
+    }
+
+    if (dir_exists("cores")) {
+        snprintf(g_root, sizeof(g_root), ".");
+        return;
+    }
+
+    if (dir_exists("../cores")) {
+        snprintf(g_root, sizeof(g_root), "..");
+        return;
+    }
+
+    snprintf(g_root, sizeof(g_root), ".");
+}
+
 int launcher_run(int argc, char **argv) {
+    printf("[launcher] CoreNest v0.1.0\n");
+    fflush(stdout);
+
+    if (SDL_Init(0) != 0) {
+        fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
+        pause_if_click(argc);
+        return 1;
+    }
+
+    find_root();
+    printf("[launcher] root: %s\n", g_root);
+    printf("[launcher] argc=%d\n", argc);
+    fflush(stdout);
+
     char *core_path = NULL;
     char *rom_path  = NULL;
     int   free_core = 0;
     int   free_rom  = 0;
-
-    printf("[launcher] CoreNest v0.1.0\n");
-    printf("[launcher] argc=%d\n", argc);
-    fflush(stdout);
 
     if (argc >= 3) {
         core_path = dup_str(argv[1]);
@@ -127,8 +228,8 @@ int launcher_run(int argc, char **argv) {
         rom_path  = dup_str(argv[1]);
         free_rom  = 1;
 
-        core_path = find_first("cores", ".dll");
-        if (!core_path) core_path = find_first("cores", ".so");
+        core_path = find_in_roots("cores", ".dll");
+        if (!core_path) core_path = find_in_roots("cores", ".so");
         free_core = 1;
     } else {
         static const struct {
@@ -150,39 +251,63 @@ int launcher_run(int argc, char **argv) {
         const size_t table_n = sizeof(table) / sizeof(table[0]);
 
         for (size_t i = 0; i < table_n && !rom_path; i++) {
-            rom_path = find_first("roms", table[i].ext);
+            rom_path = find_in_roots("roms", table[i].ext);
             if (!rom_path) continue;
 
-            char core_name[256];
+            char name[256];
 
-            snprintf(core_name, sizeof(core_name),
-                     "cores/%s_libretro.dll", table[i].core);
-            if (file_exists(core_name)) {
-                core_path = dup_str(core_name);
-                break;
+            snprintf(name, sizeof(name), "%s_libretro.dll", table[i].core);
+            if (file_exists_in_roots("cores", name)) {
+                char p[1200];
+                snprintf(p, sizeof(p), "%s/cores/%s", g_root, name);
+                if (file_exists(p)) {
+                    core_path = dup_str(p);
+                    break;
+                }
+                snprintf(p, sizeof(p), "cores/%s", name);
+                if (file_exists(p)) {
+                    core_path = dup_str(p);
+                    break;
+                }
+                snprintf(p, sizeof(p), "../cores/%s", name);
+                if (file_exists(p)) {
+                    core_path = dup_str(p);
+                    break;
+                }
             }
 
-            snprintf(core_name, sizeof(core_name),
-                     "cores/%s_libretro.so", table[i].core);
-            if (file_exists(core_name)) {
-                core_path = dup_str(core_name);
-                break;
+            snprintf(name, sizeof(name), "%s_libretro.so", table[i].core);
+            if (file_exists_in_roots("cores", name)) {
+                char p[1200];
+                snprintf(p, sizeof(p), "%s/cores/%s", g_root, name);
+                if (file_exists(p)) {
+                    core_path = dup_str(p);
+                    break;
+                }
+                snprintf(p, sizeof(p), "cores/%s", name);
+                if (file_exists(p)) {
+                    core_path = dup_str(p);
+                    break;
+                }
+                snprintf(p, sizeof(p), "../cores/%s", name);
+                if (file_exists(p)) {
+                    core_path = dup_str(p);
+                    break;
+                }
             }
 
-            fprintf(stderr,
-                    "[launcher] warn: no core for %s (expected %s_libretro.dll)\n",
-                    table[i].ext, table[i].core);
+            fprintf(stderr, "[launcher] warn: no core for %s\n", table[i].ext);
         }
 
         if (!core_path) {
-            core_path = find_first("cores", ".dll");
-            if (!core_path) core_path = find_first("cores", ".so");
+            core_path = find_in_roots("cores", ".dll");
+            if (!core_path) core_path = find_in_roots("cores", ".so");
         }
         if (!rom_path) {
-            rom_path = find_first("roms", ".gb");
-            if (!rom_path) rom_path = find_first("roms", ".gba");
-            if (!rom_path) rom_path = find_first("roms", ".nes");
-            if (!rom_path) rom_path = find_first("roms", ".sfc");
+            rom_path = find_in_roots("roms", ".gb");
+            if (!rom_path) rom_path = find_in_roots("roms", ".gba");
+            if (!rom_path) rom_path = find_in_roots("roms", ".nes");
+            if (!rom_path) rom_path = find_in_roots("roms", ".sfc");
         }
 
         free_core = 1;
@@ -190,14 +315,14 @@ int launcher_run(int argc, char **argv) {
     }
 
     if (!core_path) {
-        fprintf(stderr, "error: no core found in cores/\n");
+        fprintf(stderr, "error: no core found\n");
         pause_if_click(argc);
         if (free_core) free(core_path);
         if (free_rom)  free(rom_path);
         return 1;
     }
     if (!rom_path) {
-        fprintf(stderr, "error: no rom found in roms/\n");
+        fprintf(stderr, "error: no rom found\n");
         pause_if_click(argc);
         if (free_core) free(core_path);
         if (free_rom)  free(rom_path);
@@ -208,15 +333,6 @@ int launcher_run(int argc, char **argv) {
     printf("[launcher] rom:  %s\n", rom_path);
     fflush(stdout);
 
-    if (SDL_Init(0) != 0) {
-        fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
-        pause_if_click(argc);
-        if (free_core) free(core_path);
-        if (free_rom)  free(rom_path);
-        return 1;
-    }
-    printf("[launcher] SDL_Init ok\n"); fflush(stdout);
-
     if (!core_load(core_path, &g_core)) {
         pause_if_click(argc);
         if (free_core) free(core_path);
@@ -225,7 +341,7 @@ int launcher_run(int argc, char **argv) {
     }
     printf("[launcher] core_load ok\n"); fflush(stdout);
 
-    env_set_paths(".", ".");
+    env_set_paths(g_root, g_root);
 
     g_core.retro_set_environment(cb_environment);
     g_core.retro_set_video_refresh(cb_video);
