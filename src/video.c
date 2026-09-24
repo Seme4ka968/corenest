@@ -12,7 +12,7 @@ static uint32_t     *g_pixels = NULL;
 static int           g_scale = 3;
 static int           g_fullscreen = 0;
 static int           g_fast_forward = 0;
-static char          g_base_title[256] = "CoreNest v0.1.0";
+static char          g_base_title[256] = "CoreNest";
 
 bool video_init(unsigned width, unsigned height) {
     if (SDL_InitSubSystem(SDL_INIT_VIDEO) != 0) {
@@ -28,6 +28,15 @@ bool video_init(unsigned width, unsigned height) {
     if (!g_window) {
         fprintf(stderr, "video: CreateWindow failed: %s\n", SDL_GetError());
         return false;
+    }
+
+    {
+        SDL_Surface *icon = SDL_LoadBMP("corenest.bmp");
+        if (!icon) icon = SDL_LoadBMP("../corenest.bmp");
+        if (icon) {
+            SDL_SetWindowIcon(g_window, icon);
+            SDL_FreeSurface(icon);
+        }
     }
 
     g_renderer = SDL_CreateRenderer(g_window, -1,
