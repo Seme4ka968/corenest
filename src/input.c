@@ -56,6 +56,31 @@ void input_poll(void) {
     g_keys = SDL_GetKeyboardState(NULL);
 }
 
+void input_refresh(void) {
+    if (g_pad) {
+        SDL_GameControllerClose(g_pad);
+        g_pad = NULL;
+    }
+
+    int n = SDL_NumJoysticks();
+    printf("[input] refresh: joysticks: %d\n", n);
+
+    for (int i = 0; i < n; i++) {
+        if (SDL_IsGameController(i)) {
+            g_pad = SDL_GameControllerOpen(i);
+            if (g_pad) {
+                printf("[input] opened controller %d: %s\n",
+                       i, SDL_GameControllerName(g_pad));
+                break;
+            }
+        }
+    }
+
+    if (!g_pad) {
+        printf("[input] no gamepad, keyboard only\n");
+    }
+}
+
 static int16_t pad_button(SDL_GameControllerButton b) {
     if (!g_pad) return 0;
     return SDL_GameControllerGetButton(g_pad, b) ? 1 : 0;
