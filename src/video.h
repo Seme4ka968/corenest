@@ -19,4 +19,8 @@ int  video_get_scale(void);
 void video_toggle_filter(void);
 int  video_is_fullscreen(void);
 
+void video_set_fast_forward(int on);
+int  video_is_fast_forward(void);
+int  video_screenshot(const char *path);
+
 #endif
