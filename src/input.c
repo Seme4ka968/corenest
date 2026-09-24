@@ -6,20 +6,36 @@ static const uint8_t *g_keys = NULL;
 static SDL_GameController *g_pad = NULL;
 
 bool input_init(void) {
+    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI, "1");
+    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_XBOX, "1");
+    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS4, "1");
+    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS5, "1");
+    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_SWITCH, "1");
+    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_GAMECUBE, "1");
+    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+
     if (SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK | SDL_INIT_HIDAPI) != 0) {
-    fprintf(stderr, "input: SDL_Init GAMECONTROLLER failed: %s\n", SDL_GetError());
-}
+        fprintf(stderr, "input: SDL_Init GAMECONTROLLER failed: %s\n", SDL_GetError());
+    }
+
+    SDL_version v;
+    SDL_GetVersion(&v);
+    printf("[input] SDL %d.%d.%d\n", v.major, v.minor, v.patch);
 
     int n = SDL_NumJoysticks();
     printf("[input] joysticks: %d\n", n);
 
     for (int i = 0; i < n; i++) {
-        if (SDL_IsGameController(i)) {
+        const char *name = SDL_JoystickNameForIndex(i);
+        int is_gc = SDL_IsGameController(i);
+        printf("[input]   [%d] %s (gamecontroller: %s)\n",
+               i, name ? name : "?", is_gc ? "yes" : "no");
+
+        if (is_gc && !g_pad) {
             g_pad = SDL_GameControllerOpen(i);
             if (g_pad) {
                 printf("[input] opened controller %d: %s\n",
                        i, SDL_GameControllerName(g_pad));
-                break;
             }
         }
     }
@@ -32,7 +48,7 @@ bool input_init(void) {
 
 void input_deinit(void) {
     if (g_pad) { SDL_GameControllerClose(g_pad); g_pad = NULL; }
-    SDL_QuitSubSystem(SDL_INIT_GAMECONTROLLER);
+    SDL_QuitSubSystem(SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK | SDL_INIT_HIDAPI);
 }
 
 void input_poll(void) {
