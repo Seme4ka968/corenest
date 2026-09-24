@@ -48,7 +48,7 @@ bool input_init(void) {
 
 void input_deinit(void) {
     if (g_pad) { SDL_GameControllerClose(g_pad); g_pad = NULL; }
-    SDL_QuitSubSystem(SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK | SDL_INIT_HIDAPI);
+    SDL_QuitSubSystem(SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK);
 }
 
 void input_poll(void) {
