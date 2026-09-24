@@ -26,6 +26,8 @@ typedef struct {
     size_t (*retro_serialize_size)(void);
     bool (*retro_serialize)(void *data, size_t size);
     bool (*retro_unserialize)(const void *data, size_t size);
+    void *(*retro_get_memory_data)(unsigned id);
+    size_t (*retro_get_memory_size)(unsigned id);
 } core_api_t;
 
 bool core_load(const char *path, core_api_t *api);
