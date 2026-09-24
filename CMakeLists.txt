@@ -21,6 +21,7 @@ set(SOURCES
     src/video.c
     src/audio.c
     src/input.c
+    src/save.c
 )
 
 add_executable(corenest ${SOURCES})
@@ -49,4 +50,3 @@ target_link_libraries(corenest
 if(WIN32)
     target_link_options(corenest PRIVATE -static -static-libgcc)
 endif()
-
