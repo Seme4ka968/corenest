@@ -29,7 +29,6 @@ static int g_running = 1;
 static enum retro_pixel_format g_fmt = RETRO_PIXEL_FORMAT_0RGB1555;
 static char g_root[1024] = ".";
 
-/* --- Колбэки libretro --- */
 static void cb_video(const void *data, unsigned w, unsigned h, size_t pitch) {
     if (!data) { video_present(); return; }
     video_refresh(data, w, h, pitch, g_fmt);
@@ -49,7 +48,6 @@ static bool cb_environment(unsigned cmd, void *data) {
     return env_callback(cmd, data);
 }
 
-/* --- Утилиты --- */
 static int ends_with(const char *s, const char *suffix) {
     if (!s || !suffix) return 0;
     size_t ls = strlen(s), lx = strlen(suffix);
@@ -256,11 +254,10 @@ int launcher_run(int argc, char **argv) {
     printf("[launcher] CoreNest v0.1.0\n");
     fflush(stdout);
 
-    if (SDL_Init(SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER | SDL_INIT_HIDAPI) != 0) 
-    {
-    fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
-    pause_if_click(argc);
-    return 1;
+    if (SDL_Init(SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER | SDL_INIT_HIDAPI) != 0) {
+        fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
+        pause_if_click(argc);
+        return 1;
     }
 
     find_root();
