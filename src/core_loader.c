@@ -53,6 +53,8 @@ bool core_load(const char *path, core_api_t *api) {
     *(void**)(&api->retro_serialize_size)             = LIB_SYM(api->handle, "retro_serialize_size");
     *(void**)(&api->retro_serialize)                  = LIB_SYM(api->handle, "retro_serialize");
     *(void**)(&api->retro_unserialize)                = LIB_SYM(api->handle, "retro_unserialize");
+    *(void**)(&api->retro_get_memory_data)            = LIB_SYM(api->handle, "retro_get_memory_data");
+    *(void**)(&api->retro_get_memory_size)            = LIB_SYM(api->handle, "retro_get_memory_size");
 
     return true;
 }
