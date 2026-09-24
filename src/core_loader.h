@@ -2,6 +2,7 @@
 #define CORE_LOADER_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include "libretro.h"
 
 typedef struct {
