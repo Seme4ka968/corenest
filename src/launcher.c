@@ -49,8 +49,6 @@ static bool cb_environment(unsigned cmd, void *data) {
     return env_callback(cmd, data);
 }
 
-/* --- Вспомогательные функции --- */
-
 static int ends_with(const char *s, const char *suffix) {
     if (!s || !suffix) return 0;
     size_t ls = strlen(s), lx = strlen(suffix);
@@ -58,8 +56,14 @@ static int ends_with(const char *s, const char *suffix) {
     return strcmp(s + ls - lx, suffix) == 0;
 }
 
-/* Найти первый файл в папке с заданным расширением.
-   Возвращает malloc-строку, или NULL. */
+static char *dup_str(const char *s) {
+    if (!s) return NULL;
+    size_t n = strlen(s) + 1;
+    char *p = (char*)malloc(n);
+    if (p) memcpy(p, s, n);
+    return p;
+}
+
 static char *find_first(const char *dir, const char *ext) {
     DIR *d = opendir(dir);
     if (!d) return NULL;
@@ -81,7 +85,12 @@ static char *find_first(const char *dir, const char *ext) {
     return result;
 }
 
-/* Пауза для двойного клика */
+static int file_exists(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (f) { fclose(f); return 1; }
+    return 0;
+}
+
 static void pause_if_click(int argc) {
     if (argc <= 1) {
         printf("\nPress Enter to exit...\n");
@@ -90,7 +99,14 @@ static void pause_if_click(int argc) {
     }
 }
 
-/* --- Точка входа --- */
+static const char *pixel_format_name(enum retro_pixel_format fmt) {
+    switch (fmt) {
+    case RETRO_PIXEL_FORMAT_0RGB1555: return "0RGB1555";
+    case RETRO_PIXEL_FORMAT_XRGB8888: return "XRGB8888";
+    case RETRO_PIXEL_FORMAT_RGB565:   return "RGB565";
+    default:                          return "UNKNOWN";
+    }
+}
 
 int launcher_run(int argc, char **argv) {
     char *core_path = NULL;
@@ -98,53 +114,113 @@ int launcher_run(int argc, char **argv) {
     int   free_core = 0;
     int   free_rom  = 0;
 
-    printf("[launcher] start (argc=%d)\n", argc); fflush(stdout);
+    printf("[launcher] CoreNest v0.1.0\n");
+    printf("[launcher] argc=%d\n", argc);
+    fflush(stdout);
 
-    /* Разбор аргументов */
     if (argc >= 3) {
-        core_path = argv[1];
-        rom_path  = argv[2];
+        core_path = dup_str(argv[1]);
+        rom_path  = dup_str(argv[2]);
+        free_core = 1;
+        free_rom  = 1;
     } else if (argc == 2) {
-        rom_path  = argv[1];
+        rom_path  = dup_str(argv[1]);
+        free_rom  = 1;
+
         core_path = find_first("cores", ".dll");
         if (!core_path) core_path = find_first("cores", ".so");
         free_core = 1;
     } else {
-        core_path = find_first("cores", ".dll");
-        if (!core_path) core_path = find_first("cores", ".so");
-        rom_path  = find_first("roms", ".gb");
-        if (!rom_path) rom_path = find_first("roms", ".gbc");
-        if (!rom_path) rom_path = find_first("roms", ".gba");
-        if (!rom_path) rom_path = find_first("roms", ".nes");
-        if (!rom_path) rom_path = find_first("roms", ".sfc");
-        if (!rom_path) rom_path = find_first("roms", ".smc");
+        static const struct {
+            const char *ext;
+            const char *core;
+        } table[] = {
+            { ".gb",  "gambatte"          },
+            { ".gbc", "gambatte"          },
+            { ".gba", "mgba"              },
+            { ".nes", "nestopia"          },
+            { ".sfc", "snes9x"            },
+            { ".smc", "snes9x"            },
+            { ".md",  "genesis_plus_gx"   },
+            { ".gen", "genesis_plus_gx"   },
+            { ".sms", "genesis_plus_gx"   },
+            { ".gg",  "genesis_plus_gx"   },
+            { ".pce", "mednafen_pce_fast" },
+        };
+        const size_t table_n = sizeof(table) / sizeof(table[0]);
+
+        for (size_t i = 0; i < table_n && !rom_path; i++) {
+            rom_path = find_first("roms", table[i].ext);
+            if (!rom_path) continue;
+
+            char core_name[256];
+
+            snprintf(core_name, sizeof(core_name),
+                     "cores/%s_libretro.dll", table[i].core);
+            if (file_exists(core_name)) {
+                core_path = dup_str(core_name);
+                break;
+            }
+
+            snprintf(core_name, sizeof(core_name),
+                     "cores/%s_libretro.so", table[i].core);
+            if (file_exists(core_name)) {
+                core_path = dup_str(core_name);
+                break;
+            }
+
+            fprintf(stderr,
+                    "[launcher] warn: no core for %s (expected %s_libretro.dll)\n",
+                    table[i].ext, table[i].core);
+        }
+
+        if (!core_path) {
+            core_path = find_first("cores", ".dll");
+            if (!core_path) core_path = find_first("cores", ".so");
+        }
+        if (!rom_path) {
+            rom_path = find_first("roms", ".gb");
+            if (!rom_path) rom_path = find_first("roms", ".gba");
+            if (!rom_path) rom_path = find_first("roms", ".nes");
+            if (!rom_path) rom_path = find_first("roms", ".sfc");
+        }
+
         free_core = 1;
         free_rom  = 1;
     }
 
     if (!core_path) {
-        fprintf(stderr, "error: no core found in cores\\\n");
+        fprintf(stderr, "error: no core found in cores/\n");
         pause_if_click(argc);
+        if (free_core) free(core_path);
+        if (free_rom)  free(rom_path);
         return 1;
     }
     if (!rom_path) {
-        fprintf(stderr, "error: no rom found in roms\\\n");
+        fprintf(stderr, "error: no rom found in roms/\n");
         pause_if_click(argc);
+        if (free_core) free(core_path);
+        if (free_rom)  free(rom_path);
         return 1;
     }
 
-    printf("[launcher] core: %s\n", core_path); fflush(stdout);
-    printf("[launcher] rom:  %s\n", rom_path);  fflush(stdout);
+    printf("[launcher] core: %s\n", core_path);
+    printf("[launcher] rom:  %s\n", rom_path);
+    fflush(stdout);
 
     if (SDL_Init(0) != 0) {
         fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
         pause_if_click(argc);
+        if (free_core) free(core_path);
+        if (free_rom)  free(rom_path);
         return 1;
     }
     printf("[launcher] SDL_Init ok\n"); fflush(stdout);
 
     if (!core_load(core_path, &g_core)) {
         pause_if_click(argc);
+        if (free_core) free(core_path);
+        if (free_rom)  free(rom_path);
         return 1;
     }
     printf("[launcher] core_load ok\n"); fflush(stdout);
@@ -161,17 +237,28 @@ int launcher_run(int argc, char **argv) {
     printf("[launcher] retro_init\n"); fflush(stdout);
     g_core.retro_init();
 
+    struct retro_system_info sys_info;
+    memset(&sys_info, 0, sizeof(sys_info));
+    g_core.retro_get_system_info(&sys_info);
+    printf("[launcher] core: %s %s\n",
+           sys_info.library_name ? sys_info.library_name : "?",
+           sys_info.library_version ? sys_info.library_version : "?");
+    fflush(stdout);
+
     FILE *f = fopen(rom_path, "rb");
     if (!f) {
         fprintf(stderr, "cannot open rom: %s\n", rom_path);
         pause_if_click(argc);
+        if (free_core) free(core_path);
+        if (free_rom)  free(rom_path);
         return 1;
     }
     fseek(f, 0, SEEK_END);
     long rom_size = ftell(f);
     fseek(f, 0, SEEK_SET);
-    void *rom_data = malloc(rom_size);
-    fread(rom_data, 1, rom_size, f);
+    void *rom_data = malloc((size_t)rom_size);
+    if (!rom_data) { fclose(f); fprintf(stderr, "oom\n"); return 1; }
+    fread(rom_data, 1, (size_t)rom_size, f);
     fclose(f);
     printf("[launcher] rom loaded (%ld bytes)\n", rom_size); fflush(stdout);
 
@@ -184,6 +271,9 @@ int launcher_run(int argc, char **argv) {
     if (!g_core.retro_load_game(&game)) {
         fprintf(stderr, "core: retro_load_game failed\n");
         pause_if_click(argc);
+        free(rom_data);
+        if (free_core) free(core_path);
+        if (free_rom)  free(rom_path);
         return 1;
     }
     printf("[launcher] retro_load_game ok\n"); fflush(stdout);
@@ -200,24 +290,34 @@ int launcher_run(int argc, char **argv) {
     printf("[launcher] video_init\n"); fflush(stdout);
     if (!video_init(av.geometry.base_width, av.geometry.base_height)) {
         pause_if_click(argc);
+        free(rom_data);
+        if (free_core) free(core_path);
+        if (free_rom)  free(rom_path);
         return 1;
     }
 
     printf("[launcher] audio_init\n"); fflush(stdout);
     if (!audio_init(av.timing.sample_rate)) {
         pause_if_click(argc);
+        free(rom_data);
+        if (free_core) free(core_path);
+        if (free_rom)  free(rom_path);
         return 1;
     }
 
     printf("[launcher] input_init\n"); fflush(stdout);
     if (!input_init()) {
         pause_if_click(argc);
+        free(rom_data);
+        if (free_core) free(core_path);
+        if (free_rom)  free(rom_path);
         return 1;
     }
 
     if (g_core.retro_set_controller_port_device)
         g_core.retro_set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
 
+    printf("[launcher] pixel format: %s\n", pixel_format_name(g_fmt));
     printf("[launcher] entering main loop\n"); fflush(stdout);
 
     while (g_running) {
@@ -243,5 +343,6 @@ int launcher_run(int argc, char **argv) {
     if (free_core) free(core_path);
     if (free_rom)  free(rom_path);
 
+    printf("[launcher] done\n"); fflush(stdout);
     return 0;
 }
