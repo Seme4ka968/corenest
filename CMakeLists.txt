@@ -16,12 +16,12 @@ include_directories(
 set(SOURCES
     src/main.c
     src/launcher.c
-    src/core_loader.c
-    src/environment.c
-    src/video.c
-    src/audio.c
-    src/input.c
-    src/save.c
+    src/core/core.c
+    src/core/environment.c
+    src/drivers/video/video.c
+    src/drivers/audio/audio.c
+    src/drivers/input/input.c
+    src/save/save.c
 )
 
 add_executable(corenest ${SOURCES})
