@@ -3,6 +3,7 @@
 #include <stdio.h>
 
 static SDL_AudioDeviceID g_dev = 0;
+static int g_muted = 0;
 
 bool audio_init(double sample_rate) {
     if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) {
@@ -24,7 +25,19 @@ bool audio_init(double sample_rate) {
     }
 
     SDL_PauseAudioDevice(g_dev, 0);
+    g_muted = 0;
     return true;
+}
+
+void audio_set_mute(int mute) {
+    g_muted = mute ? 1 : 0;
+    if (g_dev && g_muted) {
+        SDL_ClearQueuedAudio(g_dev);
+    }
+}
+
+int audio_is_muted(void) {
+    return g_muted;
 }
 
 void audio_deinit(void) {
@@ -36,13 +49,13 @@ void audio_deinit(void) {
 }
 
 void audio_push_sample(int16_t left, int16_t right) {
-    if (!g_dev) return;
+    if (!g_dev || g_muted) return;
     int16_t buf[2] = { left, right };
     SDL_QueueAudio(g_dev, buf, sizeof(buf));
 }
 
 size_t audio_push_batch(const int16_t *data, size_t frames) {
-    if (!g_dev || !data) return 0;
+    if (!g_dev || !data || g_muted) return frames;
     SDL_QueueAudio(g_dev, data, (Uint32)(frames * 2 * sizeof(int16_t)));
     return frames;
 }
