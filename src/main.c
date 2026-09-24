@@ -41,12 +41,12 @@ static int16_t cb_input_state(unsigned port, unsigned device,
     return input_state(port, device, index, id);
 }
 
-static void cb_environment(unsigned cmd, void *data) {
+static bool cb_environment(unsigned cmd, void *data) {
     if (cmd == RETRO_ENVIRONMENT_SET_PIXEL_FORMAT) {
         g_fmt = *(const enum retro_pixel_format*)data;
-        return;
+        return true;
     }
-    env_callback(cmd, data);
+    return env_callback(cmd, data);
 }
 
 int main(int argc, char **argv) {
@@ -103,7 +103,8 @@ int main(int argc, char **argv) {
     if (!audio_init(av.timing.sample_rate)) return 1;
     if (!input_init()) return 1;
 
-    g_core.retro_set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
+    if (g_core.retro_set_controller_port_device)
+        g_core.retro_set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
 
     while (g_running) {
         SDL_Event e;
