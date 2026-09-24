@@ -565,8 +565,17 @@ int launcher_run(int argc, char **argv) {
     while (g_running) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
-            if (e.type == SDL_QUIT) g_running = 0;
-            else if (e.type == SDL_KEYDOWN) {
+            if (e.type == SDL_QUIT) {
+                g_running = 0;
+            } else if (e.type == SDL_CONTROLLERDEVICEADDED) {
+                printf("[launcher] gamepad connected (hot-plug)\n");
+                fflush(stdout);
+                input_refresh();
+            } else if (e.type == SDL_CONTROLLERDEVICEREMOVED) {
+                printf("[launcher] gamepad disconnected (hot-plug)\n");
+                fflush(stdout);
+                input_refresh();
+            } else if (e.type == SDL_KEYDOWN) {
                 switch (e.key.keysym.sym) {
                 case SDLK_ESCAPE: g_running = 0; break;
                 case SDLK_F11: video_toggle_fullscreen(); break;
