@@ -191,7 +191,7 @@ static char *pick_core_for_rom(const char *rom_path) {
 static int select_from_list(const char *title, char **list, int count) {
     printf("\n");
     printf("===============================================\n");
-    printf("  CoreNest v0.2.0 - %s\n", title);
+    printf("  CoreNest v0.3.0 - %s\n", title);
     printf("===============================================\n\n");
 
     for (int i = 0; i < count; i++) {
@@ -261,8 +261,32 @@ static void find_root(void) {
     snprintf(g_root, sizeof(g_root), ".");
 }
 
+static void print_help(void) {
+    printf("\n");
+    printf("===============================================\n");
+    printf("  CoreNest v0.3.0 - Help\n");
+    printf("===============================================\n");
+    printf("  Esc         - Exit (auto-save RAM)\n");
+    printf("  F1          - Reset\n");
+    printf("  F2 / F3     - Save / Load RAM\n");
+    printf("  F5 / F8     - Save / Load State\n");
+    printf("  F9          - Toggle FPS counter\n");
+    printf("  F10         - Toggle auto-pause on focus loss\n");
+    printf("  F11         - Fullscreen toggle\n");
+    printf("  F12         - Screenshot -> screenshots/\n");
+    printf("  1 / 2 / 3 / 4 - Window scale 1x-4x\n");
+    printf("  Tab         - Fast-forward on/off\n");
+    printf("  F           - Filter toggle (nearest/linear)\n");
+    printf("  H           - This help\n");
+    printf("  P           - Pause / Resume\n");
+    printf("  M           - Mute audio on/off\n");
+    printf("  R           - Rescan ROMs (exit + restart)\n");
+    printf("===============================================\n\n");
+    fflush(stdout);
+}
+
 int launcher_run(int argc, char **argv) {
-    printf("[launcher] CoreNest v0.2.0\n");
+    printf("[launcher] CoreNest v0.3.0\n");
     fflush(stdout);
 
     if (SDL_Init(SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER) != 0) {
@@ -550,7 +574,7 @@ int launcher_run(int argc, char **argv) {
 
     {
         char t[256];
-        snprintf(t, sizeof(t), "CoreNest v0.2.0 - %s - %s",
+        snprintf(t, sizeof(t), "CoreNest v0.3.0 - %s - %s",
                  sys_info.library_name ? sys_info.library_name : "core",
                  basename_of(rom_path));
         video_set_title(t);
@@ -561,6 +585,10 @@ int launcher_run(int argc, char **argv) {
     Uint32 fps_last = SDL_GetTicks();
     int fps_count = 0;
     int paused = 0;
+    int show_fps = 1;
+    int auto_pause = 0;
+    int muted = 0;
+    int focused = 1;
 
     while (g_running) {
         SDL_Event e;
@@ -575,6 +603,12 @@ int launcher_run(int argc, char **argv) {
                 printf("[launcher] gamepad disconnected (hot-plug)\n");
                 fflush(stdout);
                 input_refresh();
+            } else if (e.type == SDL_WINDOWEVENT) {
+                if (e.window.event == SDL_WINDOWEVENT_FOCUS_GAINED) {
+                    focused = 1;
+                } else if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
+                    focused = 0;
+                }
             } else if (e.type == SDL_KEYDOWN) {
                 switch (e.key.keysym.sym) {
                 case SDLK_ESCAPE: g_running = 0; break;
@@ -589,6 +623,25 @@ int launcher_run(int argc, char **argv) {
                 case SDLK_F3:  save_ram_load(&g_core, rom_path, g_root); break;
                 case SDLK_F5:  save_state_save(&g_core, rom_path, g_root); break;
                 case SDLK_F8:  save_state_load(&g_core, rom_path, g_root); break;
+                case SDLK_F9:
+                    show_fps = !show_fps;
+                    printf("[launcher] FPS counter: %s\n", show_fps ? "on" : "off");
+                    fflush(stdout);
+                    break;
+                case SDLK_F10:
+                    auto_pause = !auto_pause;
+                    printf("[launcher] auto-pause: %s\n", auto_pause ? "on" : "off");
+                    fflush(stdout);
+                    break;
+                case SDLK_h:
+                    print_help();
+                    break;
+                case SDLK_m:
+                    muted = !muted;
+                    audio_set_mute(muted);
+                    printf("[launcher] mute: %s\n", muted ? "on" : "off");
+                    fflush(stdout);
+                    break;
                 case SDLK_TAB:
                     video_set_fast_forward(!video_is_fast_forward());
                     printf("[launcher] fast-forward: %s\n",
@@ -619,23 +672,35 @@ int launcher_run(int argc, char **argv) {
                     printf("[launcher] %s\n", paused ? "paused" : "resumed");
                     fflush(stdout);
                     break;
+                case SDLK_r:
+                    printf("[launcher] restart requested (R)\n");
+                    fflush(stdout);
+                    g_running = 0;
+                    break;
                 }
             }
         }
 
-        if (!paused) { g_core.retro_run(); fps_count++; }
+        int effective_pause = paused || (auto_pause && !focused);
+
+        if (!effective_pause) { g_core.retro_run(); fps_count++; }
         else SDL_Delay(16);
 
         Uint32 now = SDL_GetTicks();
         if (now - fps_last >= 1000) {
             char t[256];
-            snprintf(t, sizeof(t),
-                     "CoreNest v0.2.0 | %s | %d FPS | %dx%s%s%s",
-                     sys_info.library_name ? sys_info.library_name : "core",
-                     fps_count, video_get_scale(),
-                     video_is_fullscreen() ? " | FULL" : "",
-                     paused ? " | PAUSED" : "",
-                     video_is_fast_forward() ? " | FF" : "");
+            if (show_fps) {
+                snprintf(t, sizeof(t),
+                         "CoreNest v0.3.0 | %s | %d FPS | %dx%s%s%s",
+                         sys_info.library_name ? sys_info.library_name : "core",
+                         fps_count, video_get_scale(),
+                         video_is_fullscreen() ? " | FULL" : "",
+                         paused ? " | PAUSED" : "",
+                         video_is_fast_forward() ? " | FF" : "");
+            } else {
+                snprintf(t, sizeof(t), "CoreNest v0.3.0 - %s",
+                         sys_info.library_name ? sys_info.library_name : "core");
+            }
             video_set_title(t);
             fps_count = 0;
             fps_last = now;
