@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <dirent.h>
+#include <ctype.h>
 
 #include "libretro.h"
 #include "core_loader.h"
@@ -21,36 +22,25 @@
   #define CHDIR chdir
 #endif
 
+#define MAX_FILES 128
+
 static core_api_t g_core;
 static int g_running = 1;
 static enum retro_pixel_format g_fmt = RETRO_PIXEL_FORMAT_0RGB1555;
-
 static char g_root[1024] = ".";
 
+/* --- Колбэки libretro --- */
 static void cb_video(const void *data, unsigned w, unsigned h, size_t pitch) {
     if (!data) { video_present(); return; }
     video_refresh(data, w, h, pitch, g_fmt);
     video_present();
 }
-
-static void cb_audio(int16_t left, int16_t right) {
-    audio_push_sample(left, right);
-}
-
-static size_t cb_audio_batch(const int16_t *data, size_t frames) {
-    return audio_push_batch(data, frames);
-}
-
-static void cb_input_poll(void) {
-    input_poll();
-}
-
-static int16_t cb_input_state(unsigned port, unsigned device,
-                              unsigned index, unsigned id)
-{
+static void cb_audio(int16_t left, int16_t right) { audio_push_sample(left, right); }
+static size_t cb_audio_batch(const int16_t *data, size_t frames) { return audio_push_batch(data, frames); }
+static void cb_input_poll(void) { input_poll(); }
+static int16_t cb_input_state(unsigned port, unsigned device, unsigned index, unsigned id) {
     return input_state(port, device, index, id);
 }
-
 static bool cb_environment(unsigned cmd, void *data) {
     if (cmd == RETRO_ENVIRONMENT_SET_PIXEL_FORMAT) {
         g_fmt = *(const enum retro_pixel_format*)data;
@@ -59,6 +49,7 @@ static bool cb_environment(unsigned cmd, void *data) {
     return env_callback(cmd, data);
 }
 
+/* --- Утилиты --- */
 static int ends_with(const char *s, const char *suffix) {
     if (!s || !suffix) return 0;
     size_t ls = strlen(s), lx = strlen(suffix);
@@ -86,65 +77,146 @@ static int file_exists(const char *path) {
     return 0;
 }
 
-static char *find_first(const char *dir, const char *ext) {
+/* Сравнение для qsort по имени */
+static int cmp_str(const void *a, const void *b) {
+    return strcmp(*(const char**)a, *(const char**)b);
+}
+
+/* Собрать все файлы с расширением ext из папки dir.
+   Возвращает malloc-массив строк (malloc). count — сколько нашёл.
+   Или NULL. */
+static char **list_files(const char *dir, const char *ext, int *count) {
+    *count = 0;
     DIR *d = opendir(dir);
     if (!d) return NULL;
 
-    char *result = NULL;
+    char **out = (char**)malloc(sizeof(char*) * MAX_FILES);
+    if (!out) { closedir(d); return NULL; }
+
     struct dirent *e;
     while ((e = readdir(d)) != NULL) {
         if (e->d_name[0] == '.') continue;
         if (!ends_with(e->d_name, ext)) continue;
+        if (*count >= MAX_FILES) break;
 
         size_t len = strlen(dir) + 1 + strlen(e->d_name) + 1;
-        result = (char*)malloc(len);
-        if (result) {
-            snprintf(result, len, "%s/%s", dir, e->d_name);
+        out[*count] = (char*)malloc(len);
+        if (out[*count]) {
+            snprintf(out[*count], len, "%s/%s", dir, e->d_name);
+            (*count)++;
         }
-        break;
     }
     closedir(d);
-    return result;
+
+    if (*count > 0) qsort(out, *count, sizeof(char*), cmp_str);
+    return out;
 }
 
-static char *find_in_roots(const char *subdir, const char *ext) {
-    char path[1200];
+static void free_list(char **list, int count) {
+    if (!list) return;
+    for (int i = 0; i < count; i++) free(list[i]);
+    free(list);
+}
 
-    snprintf(path, sizeof(path), "%s/%s", g_root, subdir);
-    char *r = find_first(path, ext);
-    if (r) return r;
+/* Извлечь имя файла из пути */
+static const char *basename_of(const char *path) {
+    const char *p = strrchr(path, '/');
+    if (!p) p = strrchr(path, '\\');
+    return p ? p + 1 : path;
+}
 
-    snprintf(path, sizeof(path), "%s", subdir);
-    r = find_first(path, ext);
-    if (r) return r;
+/* Подобрать ядро по расширению ROM.
+   Возвращает malloc-строку с путём, или NULL. */
+static char *pick_core_for_rom(const char *rom_path) {
+    static const struct {
+        const char *ext;
+        const char *core;
+    } table[] = {
+        { ".gb",  "gambatte"          },
+        { ".gbc", "gambatte"          },
+        { ".gba", "mgba"              },
+        { ".nes", "nestopia"          },
+        { ".sfc", "snes9x"            },
+        { ".smc", "snes9x"            },
+        { ".md",  "genesis_plus_gx"   },
+        { ".gen", "genesis_plus_gx"   },
+        { ".sms", "genesis_plus_gx"   },
+        { ".gg",  "genesis_plus_gx"   },
+        { ".pce", "mednafen_pce_fast" },
+    };
+    const size_t n = sizeof(table) / sizeof(table[0]);
 
-    snprintf(path, sizeof(path), "../%s", subdir);
-    r = find_first(path, ext);
-    if (r) return r;
+    for (size_t i = 0; i < n; i++) {
+        if (!ends_with(rom_path, table[i].ext)) continue;
 
+        char path[1200];
+
+        snprintf(path, sizeof(path), "%s/cores/%s_libretro.dll", g_root, table[i].core);
+        if (file_exists(path)) return dup_str(path);
+
+        snprintf(path, sizeof(path), "%s/cores/%s_libretro.so", g_root, table[i].core);
+        if (file_exists(path)) return dup_str(path);
+
+        snprintf(path, sizeof(path), "cores/%s_libretro.dll", table[i].core);
+        if (file_exists(path)) return dup_str(path);
+
+        snprintf(path, sizeof(path), "cores/%s_libretro.so", table[i].core);
+        if (file_exists(path)) return dup_str(path);
+
+        return NULL;
+    }
     return NULL;
 }
 
-static int file_exists_in_roots(const char *subdir, const char *name) {
-    char path[1200];
+/* Показать список и дать выбрать. Возвращает индекс (0..n-1), или -1. */
+static int select_from_list(const char *title, char **list, int count) {
+    printf("\n");
+    printf("===============================================\n");
+    printf("  CoreNest v0.1.0 - %s\n", title);
+    printf("===============================================\n\n");
 
-    snprintf(path, sizeof(path), "%s/%s/%s", g_root, subdir, name);
-    if (file_exists(path)) return 1;
+    for (int i = 0; i < count; i++) {
+        printf("  [%d] %s\n", i + 1, basename_of(list[i]));
+    }
+    printf("\n");
 
-    snprintf(path, sizeof(path), "%s/%s", subdir, name);
-    if (file_exists(path)) return 1;
+    char buf[64];
+    while (1) {
+        printf("  Select (1-%d), or Q to quit: ", count);
+        fflush(stdout);
 
-    snprintf(path, sizeof(path), "../%s/%s", subdir, name);
-    if (file_exists(path)) return 1;
+        if (!fgets(buf, sizeof(buf), stdin)) return -1;
 
-    return 0;
+        /* Trim */
+        char *p = buf;
+        while (*p && isspace((unsigned char)*p)) p++;
+        size_t len = strlen(p);
+        while (len > 0 && isspace((unsigned char)p[len-1])) p[--len] = 0;
+
+        if (len == 0) return -1;
+        if (p[0] == 'q' || p[0] == 'Q') return -1;
+
+        char *end = NULL;
+        long v = strtol(p, &end, 10);
+        if (end == p) {
+            printf("  Invalid input, try again.\n");
+            continue;
+        }
+        if (v < 1 || v > count) {
+            printf("  Out of range, try again.\n");
+            continue;
+        }
+        return (int)(v - 1);
+    }
 }
 
+/* Пауза для двойного клика */
 static void pause_if_click(int argc) {
     if (argc <= 1) {
         printf("\nPress Enter to exit...\n");
         fflush(stdout);
-        getchar();
+        int c;
+        while ((c = getchar()) != '\n' && c != EOF) {}
     }
 }
 
@@ -166,34 +238,19 @@ static void find_root(void) {
 
         char test[1200];
         snprintf(test, sizeof(test), "%s/../cores", base);
-        if (dir_exists(test)) {
-            snprintf(g_root, sizeof(g_root), "%s/..", base);
-            SDL_free(base);
-            return;
-        }
+        if (dir_exists(test)) { snprintf(g_root, sizeof(g_root), "%s/..", base); SDL_free(base); return; }
 
         snprintf(test, sizeof(test), "%s/cores", base);
-        if (dir_exists(test)) {
-            snprintf(g_root, sizeof(g_root), "%s", base);
-            SDL_free(base);
-            return;
-        }
+        if (dir_exists(test)) { snprintf(g_root, sizeof(g_root), "%s", base); SDL_free(base); return; }
         SDL_free(base);
     }
 
-    if (dir_exists("cores")) {
-        snprintf(g_root, sizeof(g_root), ".");
-        return;
-    }
-
-    if (dir_exists("../cores")) {
-        snprintf(g_root, sizeof(g_root), "..");
-        return;
-    }
-
+    if (dir_exists("cores")) { snprintf(g_root, sizeof(g_root), "."); return; }
+    if (dir_exists("../cores")) { snprintf(g_root, sizeof(g_root), ".."); return; }
     snprintf(g_root, sizeof(g_root), ".");
 }
 
+/* --- Главная --- */
 int launcher_run(int argc, char **argv) {
     printf("[launcher] CoreNest v0.1.0\n");
     fflush(stdout);
@@ -214,92 +271,122 @@ int launcher_run(int argc, char **argv) {
     int   free_core = 0;
     int   free_rom  = 0;
 
+    /* --- 1. Аргументы --- */
     if (argc >= 3) {
         core_path = dup_str(argv[1]);
         rom_path  = dup_str(argv[2]);
-        free_core = 1;
-        free_rom  = 1;
+        free_core = 1; free_rom = 1;
     } else if (argc == 2) {
         rom_path  = dup_str(argv[1]);
         free_rom  = 1;
-
-        core_path = find_in_roots("cores", ".dll");
-        if (!core_path) core_path = find_in_roots("cores", ".so");
+        core_path = pick_core_for_rom(rom_path);
+        if (!core_path) {
+            core_path = find_first_or_null("cores", ".dll");
+            if (!core_path) core_path = find_first_or_null("cores", ".so");
+        }
         free_core = 1;
     } else {
-        static const struct {
-            const char *ext;
-            const char *core;
-        } table[] = {
-            { ".gb",  "gambatte"          },
-            { ".gbc", "gambatte"          },
-            { ".gba", "mgba"              },
-            { ".nes", "nestopia"          },
-            { ".sfc", "snes9x"            },
-            { ".smc", "snes9x"            },
-            { ".md",  "genesis_plus_gx"   },
-            { ".gen", "genesis_plus_gx"   },
-            { ".sms", "genesis_plus_gx"   },
-            { ".gg",  "genesis_plus_gx"   },
-            { ".pce", "mednafen_pce_fast" },
-        };
-        const size_t table_n = sizeof(table) / sizeof(table[0]);
+        /* --- 2. Меню --- */
+        char path[1200];
 
-        for (size_t i = 0; i < table_n && !rom_path; i++) {
-            rom_path = find_in_roots("roms", table[i].ext);
-            if (!rom_path) continue;
+        snprintf(path, sizeof(path), "%s/cores", g_root);
+        if (!dir_exists(path)) snprintf(path, sizeof(path), "cores");
 
-            char name[256];
+        int core_count = 0;
+        char **cores = list_files(path, ".dll", &core_count);
+        if (core_count == 0) {
+            free_list(cores, core_count);
+            cores = list_files(path, ".so", &core_count);
+        }
 
-            snprintf(name, sizeof(name), "%s_libretro.dll", table[i].core);
-            if (file_exists_in_roots("cores", name)) {
-                char p[1200];
-                snprintf(p, sizeof(p), "%s/cores/%s", g_root, name);
-                if (file_exists(p)) { core_path = dup_str(p); break; }
-                snprintf(p, sizeof(p), "cores/%s", name);
-                if (file_exists(p)) { core_path = dup_str(p); break; }
-                snprintf(p, sizeof(p), "../cores/%s", name);
-                if (file_exists(p)) { core_path = dup_str(p); break; }
+        if (!cores || core_count == 0) {
+            fprintf(stderr, "error: no cores found in %s/\n", path);
+            pause_if_click(argc);
+            free_list(cores, core_count);
+            return 1;
+        }
+
+        snprintf(path, sizeof(path), "%s/roms", g_root);
+        if (!dir_exists(path)) snprintf(path, sizeof(path), "roms");
+
+        int rom_count = 0;
+        char **roms = NULL;
+        const char *rom_exts[] = { ".gb", ".gbc", ".gba", ".nes", ".sfc", ".smc",
+                                   ".md", ".gen", ".sms", ".gg", ".pce" };
+        const size_t rom_exts_n = sizeof(rom_exts) / sizeof(rom_exts[0]);
+
+        char **all_roms = (char**)malloc(sizeof(char*) * MAX_FILES);
+        int all_count = 0;
+        if (all_roms) {
+            for (size_t i = 0; i < rom_exts_n; i++) {
+                int c = 0;
+                char **tmp = list_files(path, rom_exts[i], &c);
+                for (int j = 0; j < c && all_count < MAX_FILES; j++) {
+                    all_roms[all_count++] = dup_str(tmp[j]);
+                }
+                free_list(tmp, c);
             }
+            if (all_count > 0) qsort(all_roms, all_count, sizeof(char*), cmp_str);
+        }
+        roms = all_roms;
+        rom_count = all_count;
 
-            snprintf(name, sizeof(name), "%s_libretro.so", table[i].core);
-            if (file_exists_in_roots("cores", name)) {
-                char p[1200];
-                snprintf(p, sizeof(p), "%s/cores/%s", g_root, name);
-                if (file_exists(p)) { core_path = dup_str(p); break; }
-                snprintf(p, sizeof(p), "cores/%s", name);
-                if (file_exists(p)) { core_path = dup_str(p); break; }
-                snprintf(p, sizeof(p), "../cores/%s", name);
-                if (file_exists(p)) { core_path = dup_str(p); break; }
+        if (!roms || rom_count == 0) {
+            fprintf(stderr, "error: no roms found in %s/\n", path);
+            pause_if_click(argc);
+            free_list(cores, core_count);
+            free_list(roms, rom_count);
+            return 1;
+        }
+
+        /* Выбор */
+        if (rom_count == 1) {
+            /* Один ROM — сразу */
+            rom_path  = dup_str(roms[0]);
+            free_rom  = 1;
+            core_path = pick_core_for_rom(rom_path);
+            if (!core_path) core_path = dup_str(cores[0]);
+            free_core = 1;
+        } else {
+            /* Меню */
+            int idx = select_from_list("ROM Selector", roms, rom_count);
+            if (idx < 0) {
+                free_list(cores, core_count);
+                free_list(roms, rom_count);
+                return 0;
             }
-
-            fprintf(stderr, "[launcher] warn: no core for %s\n", table[i].ext);
+            rom_path  = dup_str(roms[idx]);
+            free_rom  = 1;
+            core_path = pick_core_for_rom(rom_path);
+            if (!core_path) {
+                if (core_count == 1) {
+                    core_path = dup_str(cores[0]);
+                } else {
+                    int cidx = select_from_list("Core Selector", cores, core_count);
+                    if (cidx < 0) {
+                        free_list(cores, core_count);
+                        free_list(roms, rom_count);
+                        return 0;
+                    }
+                    core_path = dup_str(cores[cidx]);
+                }
+            }
+            free_core = 1;
         }
 
-        if (!core_path) {
-            core_path = find_in_roots("cores", ".dll");
-            if (!core_path) core_path = find_in_roots("cores", ".so");
-        }
-        if (!rom_path) {
-            rom_path = find_in_roots("roms", ".gb");
-            if (!rom_path) rom_path = find_in_roots("roms", ".gba");
-            if (!rom_path) rom_path = find_in_roots("roms", ".nes");
-            if (!rom_path) rom_path = find_in_roots("roms", ".sfc");
-        }
-
-        free_core = 1;
-        free_rom  = 1;
+        free_list(cores, core_count);
+        free_list(roms, rom_count);
     }
 
     if (!core_path) {
-        fprintf(stderr, "error: no core found\n");
+        fprintf(stderr, "error: no core selected\n");
         pause_if_click(argc);
         if (free_core) free(core_path);
         if (free_rom)  free(rom_path);
         return 1;
     }
     if (!rom_path) {
-        fprintf(stderr, "error: no rom found\n");
+        fprintf(stderr, "error: no rom selected\n");
         pause_if_click(argc);
         if (free_core) free(core_path);
         if (free_rom)  free(rom_path);
@@ -382,8 +469,7 @@ int launcher_run(int argc, char **argv) {
 
     printf("[launcher] video_init\n"); fflush(stdout);
     if (!video_init(av.geometry.base_width, av.geometry.base_height)) {
-        pause_if_click(argc);
-        free(rom_data);
+        pause_if_click(argc); free(rom_data);
         if (free_core) free(core_path);
         if (free_rom)  free(rom_path);
         return 1;
@@ -391,8 +477,7 @@ int launcher_run(int argc, char **argv) {
 
     printf("[launcher] audio_init\n"); fflush(stdout);
     if (!audio_init(av.timing.sample_rate)) {
-        pause_if_click(argc);
-        free(rom_data);
+        pause_if_click(argc); free(rom_data);
         if (free_core) free(core_path);
         if (free_rom)  free(rom_path);
         return 1;
@@ -400,8 +485,7 @@ int launcher_run(int argc, char **argv) {
 
     printf("[launcher] input_init\n"); fflush(stdout);
     if (!input_init()) {
-        pause_if_click(argc);
-        free(rom_data);
+        pause_if_click(argc); free(rom_data);
         if (free_core) free(core_path);
         if (free_rom)  free(rom_path);
         return 1;
@@ -414,48 +498,32 @@ int launcher_run(int argc, char **argv) {
 
     {
         char t[256];
-        snprintf(t, sizeof(t), "CoreNest v0.1.0 \xe2\x80\x94 %s",
-                 sys_info.library_name ? sys_info.library_name : "core");
+        snprintf(t, sizeof(t), "CoreNest v0.1.0 - %s - %s",
+                 sys_info.library_name ? sys_info.library_name : "core",
+                 basename_of(rom_path));
         video_set_title(t);
     }
 
     printf("[launcher] entering main loop\n"); fflush(stdout);
 
-    Uint32 fps_last  = SDL_GetTicks();
-    int    fps_count = 0;
-    int    paused    = 0;
+    Uint32 fps_last = SDL_GetTicks();
+    int fps_count = 0;
+    int paused = 0;
 
     while (g_running) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
-            if (e.type == SDL_QUIT) {
-                g_running = 0;
-            } else if (e.type == SDL_KEYDOWN) {
+            if (e.type == SDL_QUIT) g_running = 0;
+            else if (e.type == SDL_KEYDOWN) {
                 switch (e.key.keysym.sym) {
-                case SDLK_ESCAPE:
-                    g_running = 0;
-                    break;
-                case SDLK_F11:
-                    video_toggle_fullscreen();
-                    break;
-                case SDLK_f:
-                    video_toggle_filter();
-                    break;
-                case SDLK_1:
-                    video_set_scale(1);
-                    break;
-                case SDLK_2:
-                    video_set_scale(2);
-                    break;
-                case SDLK_3:
-                    video_set_scale(3);
-                    break;
-                case SDLK_4:
-                    video_set_scale(4);
-                    break;
-                case SDLK_F1:
-                    g_core.retro_reset();
-                    break;
+                case SDLK_ESCAPE: g_running = 0; break;
+                case SDLK_F11: video_toggle_fullscreen(); break;
+                case SDLK_f:   video_toggle_filter(); break;
+                case SDLK_1:   video_set_scale(1); break;
+                case SDLK_2:   video_set_scale(2); break;
+                case SDLK_3:   video_set_scale(3); break;
+                case SDLK_4:   video_set_scale(4); break;
+                case SDLK_F1:  g_core.retro_reset(); break;
                 case SDLK_p:
                     paused = !paused;
                     printf("[launcher] %s\n", paused ? "paused" : "resumed");
@@ -465,26 +533,21 @@ int launcher_run(int argc, char **argv) {
             }
         }
 
-        if (!paused) {
-            g_core.retro_run();
-            fps_count++;
-        } else {
-            SDL_Delay(16);
-        }
+        if (!paused) { g_core.retro_run(); fps_count++; }
+        else SDL_Delay(16);
 
         Uint32 now = SDL_GetTicks();
         if (now - fps_last >= 1000) {
             char t[256];
             snprintf(t, sizeof(t),
-                     "CoreNest v0.1.0 | %s | %d FPS | scale %dx%s%s",
+                     "CoreNest v0.1.0 | %s | %d FPS | %dx%s%s",
                      sys_info.library_name ? sys_info.library_name : "core",
-                     fps_count,
-                     video_get_scale(),
+                     fps_count, video_get_scale(),
                      video_is_fullscreen() ? " | FULL" : "",
                      paused ? " | PAUSED" : "");
             video_set_title(t);
             fps_count = 0;
-            fps_last  = now;
+            fps_last = now;
         }
     }
 
@@ -505,4 +568,23 @@ int launcher_run(int argc, char **argv) {
 
     printf("[launcher] done\n"); fflush(stdout);
     return 0;
+}
+
+/* Заглушка — если нужна, добавь сюда */
+static char *find_first_or_null(const char *dir, const char *ext) {
+    DIR *d = opendir(dir);
+    if (!d) return NULL;
+
+    char *result = NULL;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        if (e->d_name[0] == '.') continue;
+        if (!ends_with(e->d_name, ext)) continue;
+        size_t len = strlen(dir) + 1 + strlen(e->d_name) + 1;
+        result = (char*)malloc(len);
+        if (result) snprintf(result, len, "%s/%s", dir, e->d_name);
+        break;
+    }
+    closedir(d);
+    return result;
 }
