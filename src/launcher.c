@@ -9,12 +9,12 @@
 #include <time.h>
 
 #include "libretro.h"
-#include "core_loader.h"
-#include "environment.h"
-#include "video.h"
-#include "audio.h"
-#include "input.h"
-#include "save.h"
+#include "core/core.h"
+#include "core/environment.h"
+#include "drivers/video/video.h"
+#include "drivers/audio/audio.h"
+#include "drivers/input/input.h"
+#include "save/save.h"
 
 #ifdef _WIN32
   #include <direct.h>
