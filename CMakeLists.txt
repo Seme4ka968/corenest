@@ -15,6 +15,7 @@ include_directories(
 
 set(SOURCES
     src/main.c
+    src/launcher.c
     src/core_loader.c
     src/environment.c
     src/video.c
