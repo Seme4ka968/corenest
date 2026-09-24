@@ -2,7 +2,7 @@
 #define VIDEO_H
 
 #include <stdbool.h>
-#include <stdint.h>
+#include <stddef.h>
 #include "libretro.h"
 
 bool video_init(unsigned width, unsigned height);
