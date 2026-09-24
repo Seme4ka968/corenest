@@ -9,7 +9,7 @@
 #include <time.h>
 
 #include "libretro.h"
-#include "core_loader.h"
+#include "core/core.h"
 #include "environment.h"
 #include "video.h"
 #include "audio.h"
