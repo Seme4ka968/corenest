@@ -11,4 +11,11 @@ void video_refresh(const void *data, unsigned width, unsigned height,
                    size_t pitch, enum retro_pixel_format fmt);
 void video_present(void);
 
+void video_toggle_fullscreen(void);
+void video_set_title(const char *title);
+void video_set_scale(int scale);
+int  video_get_scale(void);
+void video_toggle_filter(void);
+int  video_is_fullscreen(void);
+
 #endif
