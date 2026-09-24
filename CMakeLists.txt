@@ -26,6 +26,22 @@ add_executable(corenest ${SOURCES})
 
 target_link_libraries(corenest
     ${SDL2_LIBRARIES}
+    mingw32
+    SDL2main
+    SDL2
+    dinput8
+    dxguid
+    user32
+    gdi32
+    winmm
+    imm32
+    ole32
+    oleaut32
+    shell32
+    setupapi
+    version
+    uuid
+    cfgmgr32
     ${CMAKE_DL_LIBS}
 )
 
