@@ -1,6 +1,5 @@
 #include "environment.h"
-#include <stdio.h>
-#include <string.h>
+#include <stddef.h>
 
 static const char *g_system_dir = ".";
 static const char *g_save_dir   = ".";
@@ -28,7 +27,20 @@ bool env_callback(unsigned cmd, void *data) {
         return true;
 
     case RETRO_ENVIRONMENT_GET_LOG_INTERFACE:
-        return true;
+        return false;
+
+    case RETRO_ENVIRONMENT_SET_VARIABLES:
+    case RETRO_ENVIRONMENT_GET_VARIABLE:
+    case RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE:
+    case RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS:
+    case RETRO_ENVIRONMENT_SET_CONTROLLER_INFO:
+    case RETRO_ENVIRONMENT_SET_MEMORY_MAPS:
+    case RETRO_ENVIRONMENT_SET_SUPPORT_ACHIEVEMENTS:
+    case RETRO_ENVIRONMENT_GET_LANGUAGE:
+    case RETRO_ENVIRONMENT_SET_PERFORMANCE_LEVEL:
+    case RETRO_ENVIRONMENT_SET_GEOMETRY:
+    case RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO:
+        return false;
 
     default:
         return false;
