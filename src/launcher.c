@@ -266,21 +266,21 @@ static void print_help(void) {
     printf("===============================================\n");
     printf("  CoreNest v0.3.0 - Help\n");
     printf("===============================================\n");
-    printf("  Esc         - Exit (auto-save RAM)\n");
-    printf("  F1          - Reset\n");
-    printf("  F2 / F3     - Save / Load RAM\n");
-    printf("  F5 / F8     - Save / Load State\n");
-    printf("  F9          - Toggle FPS counter\n");
-    printf("  F10         - Toggle auto-pause on focus loss\n");
-    printf("  F11         - Fullscreen toggle\n");
-    printf("  F12         - Screenshot -> screenshots/\n");
+    printf("  Esc           - Exit (auto-save RAM)\n");
+    printf("  F1            - Reset\n");
+    printf("  F2 / F3       - Save / Load RAM\n");
+    printf("  F5 / F8       - Save / Load State\n");
+    printf("  F9            - Toggle FPS counter\n");
+    printf("  F10           - Focus mode: off -> mute -> pause\n");
+    printf("  F11           - Fullscreen toggle\n");
+    printf("  F12           - Screenshot -> screenshots/\n");
     printf("  1 / 2 / 3 / 4 - Window scale 1x-4x\n");
-    printf("  Tab         - Fast-forward on/off\n");
-    printf("  F           - Filter toggle (nearest/linear)\n");
-    printf("  H           - This help\n");
-    printf("  P           - Pause / Resume\n");
-    printf("  M           - Mute audio on/off\n");
-    printf("  R           - Rescan ROMs (exit + restart)\n");
+    printf("  Tab           - Fast-forward on/off\n");
+    printf("  F             - Filter toggle (nearest/linear)\n");
+    printf("  H             - This help\n");
+    printf("  P             - Pause / Resume\n");
+    printf("  M             - Mute audio on/off\n");
+    printf("  R             - Restart (exit + relaunch)\n");
     printf("===============================================\n\n");
     fflush(stdout);
 }
@@ -586,8 +586,8 @@ int launcher_run(int argc, char **argv) {
     int fps_count = 0;
     int paused = 0;
     int show_fps = 1;
-    int auto_pause = 0;
-    int muted = 0;
+    int focus_mode = 0;        /* 0 = off, 1 = mute, 2 = pause */
+    int manual_mute = 0;
     int focused = 1;
 
     while (g_running) {
@@ -629,17 +629,19 @@ int launcher_run(int argc, char **argv) {
                     fflush(stdout);
                     break;
                 case SDLK_F10:
-                    auto_pause = !auto_pause;
-                    printf("[launcher] auto-pause: %s\n", auto_pause ? "on" : "off");
-                    fflush(stdout);
+                    focus_mode = (focus_mode + 1) % 3;
+                    {
+                        const char *names[] = { "off", "mute", "pause" };
+                        printf("[launcher] focus mode: %s\n", names[focus_mode]);
+                        fflush(stdout);
+                    }
                     break;
                 case SDLK_h:
                     print_help();
                     break;
                 case SDLK_m:
-                    muted = !muted;
-                    audio_set_mute(muted);
-                    printf("[launcher] mute: %s\n", muted ? "on" : "off");
+                    manual_mute = !manual_mute;
+                    printf("[launcher] mute: %s\n", manual_mute ? "on" : "off");
                     fflush(stdout);
                     break;
                 case SDLK_TAB:
@@ -681,7 +683,13 @@ int launcher_run(int argc, char **argv) {
             }
         }
 
-        int effective_pause = paused || (auto_pause && !focused);
+        /* === FOCUS MODE === */
+        int want_mute = manual_mute;
+        if (!focused && focus_mode == 1) want_mute = 1;
+        audio_set_mute(want_mute);
+
+        int effective_pause = paused;
+        if (!focused && focus_mode == 2) effective_pause = 1;
 
         if (!effective_pause) { g_core.retro_run(); fps_count++; }
         else SDL_Delay(16);
@@ -689,17 +697,23 @@ int launcher_run(int argc, char **argv) {
         Uint32 now = SDL_GetTicks();
         if (now - fps_last >= 1000) {
             char t[256];
+            const char *focus_str = "";
+            if (focus_mode == 1) focus_str = " | FOCUS:MUTE";
+            else if (focus_mode == 2) focus_str = " | FOCUS:PAUSE";
+
             if (show_fps) {
                 snprintf(t, sizeof(t),
-                         "CoreNest v0.3.0 | %s | %d FPS | %dx%s%s%s",
+                         "CoreNest v0.3.0 | %s | %d FPS | %dx%s%s%s%s",
                          sys_info.library_name ? sys_info.library_name : "core",
                          fps_count, video_get_scale(),
                          video_is_fullscreen() ? " | FULL" : "",
                          paused ? " | PAUSED" : "",
-                         video_is_fast_forward() ? " | FF" : "");
+                         video_is_fast_forward() ? " | FF" : "",
+                         focus_str);
             } else {
-                snprintf(t, sizeof(t), "CoreNest v0.3.0 - %s",
-                         sys_info.library_name ? sys_info.library_name : "core");
+                snprintf(t, sizeof(t), "CoreNest v0.3.0 - %s%s",
+                         sys_info.library_name ? sys_info.library_name : "core",
+                         focus_str);
             }
             video_set_title(t);
             fps_count = 0;
