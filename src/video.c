@@ -94,13 +94,13 @@ void video_set_scale(int scale) {
     }
 }
 
-int video_get_scale(void) {
-    return g_scale;
-}
-
 void video_set_position(int x, int y) {
     if (!g_window) return;
     SDL_SetWindowPosition(g_window, x, y);
+}
+
+int video_get_scale(void) {
+    return g_scale;
 }
 
 void video_toggle_filter(void) {
