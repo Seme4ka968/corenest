@@ -6,9 +6,9 @@ static const uint8_t *g_keys = NULL;
 static SDL_GameController *g_pad = NULL;
 
 bool input_init(void) {
-    if (SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER) != 0) {
-        fprintf(stderr, "input: SDL_Init GAMECONTROLLER failed: %s\n", SDL_GetError());
-    }
+    if (SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK | SDL_INIT_HIDAPI) != 0) {
+    fprintf(stderr, "input: SDL_Init GAMECONTROLLER failed: %s\n", SDL_GetError());
+}
 
     int n = SDL_NumJoysticks();
     printf("[input] joysticks: %d\n", n);
