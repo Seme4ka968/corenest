@@ -254,7 +254,7 @@ int launcher_run(int argc, char **argv) {
     printf("[launcher] CoreNest v0.1.0\n");
     fflush(stdout);
 
-    if (SDL_Init(SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER | SDL_INIT_HIDAPI) != 0) {
+    if (SDL_Init(SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER) != 0) {
         fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
         pause_if_click(argc);
         return 1;
