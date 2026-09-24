@@ -50,11 +50,3 @@ if(WIN32)
     target_link_options(corenest PRIVATE -static -static-libgcc)
 endif()
 
-add_custom_command(TARGET corenest POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        ${CMAKE_SOURCE_DIR}/cores
-        $<TARGET_FILE_DIR:corenest>/cores
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        ${CMAKE_SOURCE_DIR}/roms
-        $<TARGET_FILE_DIR:corenest>/roms
-)
