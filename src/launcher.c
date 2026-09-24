@@ -77,14 +77,28 @@ static int file_exists(const char *path) {
     return 0;
 }
 
-/* Сравнение для qsort по имени */
+static char *find_first_or_null(const char *dir, const char *ext) {
+    DIR *d = opendir(dir);
+    if (!d) return NULL;
+
+    char *result = NULL;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        if (e->d_name[0] == '.') continue;
+        if (!ends_with(e->d_name, ext)) continue;
+        size_t len = strlen(dir) + 1 + strlen(e->d_name) + 1;
+        result = (char*)malloc(len);
+        if (result) snprintf(result, len, "%s/%s", dir, e->d_name);
+        break;
+    }
+    closedir(d);
+    return result;
+}
+
 static int cmp_str(const void *a, const void *b) {
     return strcmp(*(const char**)a, *(const char**)b);
 }
 
-/* Собрать все файлы с расширением ext из папки dir.
-   Возвращает malloc-массив строк (malloc). count — сколько нашёл.
-   Или NULL. */
 static char **list_files(const char *dir, const char *ext, int *count) {
     *count = 0;
     DIR *d = opendir(dir);
@@ -118,15 +132,12 @@ static void free_list(char **list, int count) {
     free(list);
 }
 
-/* Извлечь имя файла из пути */
 static const char *basename_of(const char *path) {
     const char *p = strrchr(path, '/');
     if (!p) p = strrchr(path, '\\');
     return p ? p + 1 : path;
 }
 
-/* Подобрать ядро по расширению ROM.
-   Возвращает malloc-строку с путём, или NULL. */
 static char *pick_core_for_rom(const char *rom_path) {
     static const struct {
         const char *ext;
@@ -168,7 +179,6 @@ static char *pick_core_for_rom(const char *rom_path) {
     return NULL;
 }
 
-/* Показать список и дать выбрать. Возвращает индекс (0..n-1), или -1. */
 static int select_from_list(const char *title, char **list, int count) {
     printf("\n");
     printf("===============================================\n");
@@ -187,7 +197,6 @@ static int select_from_list(const char *title, char **list, int count) {
 
         if (!fgets(buf, sizeof(buf), stdin)) return -1;
 
-        /* Trim */
         char *p = buf;
         while (*p && isspace((unsigned char)*p)) p++;
         size_t len = strlen(p);
@@ -198,19 +207,12 @@ static int select_from_list(const char *title, char **list, int count) {
 
         char *end = NULL;
         long v = strtol(p, &end, 10);
-        if (end == p) {
-            printf("  Invalid input, try again.\n");
-            continue;
-        }
-        if (v < 1 || v > count) {
-            printf("  Out of range, try again.\n");
-            continue;
-        }
+        if (end == p) { printf("  Invalid input, try again.\n"); continue; }
+        if (v < 1 || v > count) { printf("  Out of range, try again.\n"); continue; }
         return (int)(v - 1);
     }
 }
 
-/* Пауза для двойного клика */
 static void pause_if_click(int argc) {
     if (argc <= 1) {
         printf("\nPress Enter to exit...\n");
@@ -250,7 +252,6 @@ static void find_root(void) {
     snprintf(g_root, sizeof(g_root), ".");
 }
 
-/* --- Главная --- */
 int launcher_run(int argc, char **argv) {
     printf("[launcher] CoreNest v0.1.0\n");
     fflush(stdout);
@@ -271,7 +272,6 @@ int launcher_run(int argc, char **argv) {
     int   free_core = 0;
     int   free_rom  = 0;
 
-    /* --- 1. Аргументы --- */
     if (argc >= 3) {
         core_path = dup_str(argv[1]);
         rom_path  = dup_str(argv[2]);
@@ -286,7 +286,6 @@ int launcher_run(int argc, char **argv) {
         }
         free_core = 1;
     } else {
-        /* --- 2. Меню --- */
         char path[1200];
 
         snprintf(path, sizeof(path), "%s/cores", g_root);
@@ -309,27 +308,23 @@ int launcher_run(int argc, char **argv) {
         snprintf(path, sizeof(path), "%s/roms", g_root);
         if (!dir_exists(path)) snprintf(path, sizeof(path), "roms");
 
-        int rom_count = 0;
-        char **roms = NULL;
         const char *rom_exts[] = { ".gb", ".gbc", ".gba", ".nes", ".sfc", ".smc",
                                    ".md", ".gen", ".sms", ".gg", ".pce" };
         const size_t rom_exts_n = sizeof(rom_exts) / sizeof(rom_exts[0]);
 
-        char **all_roms = (char**)malloc(sizeof(char*) * MAX_FILES);
-        int all_count = 0;
-        if (all_roms) {
+        char **roms = (char**)malloc(sizeof(char*) * MAX_FILES);
+        int rom_count = 0;
+        if (roms) {
             for (size_t i = 0; i < rom_exts_n; i++) {
                 int c = 0;
                 char **tmp = list_files(path, rom_exts[i], &c);
-                for (int j = 0; j < c && all_count < MAX_FILES; j++) {
-                    all_roms[all_count++] = dup_str(tmp[j]);
+                for (int j = 0; j < c && rom_count < MAX_FILES; j++) {
+                    roms[rom_count++] = dup_str(tmp[j]);
                 }
                 free_list(tmp, c);
             }
-            if (all_count > 0) qsort(all_roms, all_count, sizeof(char*), cmp_str);
+            if (rom_count > 0) qsort(roms, rom_count, sizeof(char*), cmp_str);
         }
-        roms = all_roms;
-        rom_count = all_count;
 
         if (!roms || rom_count == 0) {
             fprintf(stderr, "error: no roms found in %s/\n", path);
@@ -339,16 +334,13 @@ int launcher_run(int argc, char **argv) {
             return 1;
         }
 
-        /* Выбор */
         if (rom_count == 1) {
-            /* Один ROM — сразу */
             rom_path  = dup_str(roms[0]);
             free_rom  = 1;
             core_path = pick_core_for_rom(rom_path);
             if (!core_path) core_path = dup_str(cores[0]);
             free_core = 1;
         } else {
-            /* Меню */
             int idx = select_from_list("ROM Selector", roms, rom_count);
             if (idx < 0) {
                 free_list(cores, core_count);
@@ -568,23 +560,4 @@ int launcher_run(int argc, char **argv) {
 
     printf("[launcher] done\n"); fflush(stdout);
     return 0;
-}
-
-/* Заглушка — если нужна, добавь сюда */
-static char *find_first_or_null(const char *dir, const char *ext) {
-    DIR *d = opendir(dir);
-    if (!d) return NULL;
-
-    char *result = NULL;
-    struct dirent *e;
-    while ((e = readdir(d)) != NULL) {
-        if (e->d_name[0] == '.') continue;
-        if (!ends_with(e->d_name, ext)) continue;
-        size_t len = strlen(dir) + 1 + strlen(e->d_name) + 1;
-        result = (char*)malloc(len);
-        if (result) snprintf(result, len, "%s/%s", dir, e->d_name);
-        break;
-    }
-    closedir(d);
-    return result;
 }
