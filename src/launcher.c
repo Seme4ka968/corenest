@@ -13,14 +13,7 @@
 #include "video.h"
 #include "audio.h"
 #include "input.h"
-
-#ifdef _WIN32
-  #include <direct.h>
-  #define CHDIR _chdir
-#else
-  #include <unistd.h>
-  #define CHDIR chdir
-#endif
+#include "save.h"
 
 #define MAX_FILES 128
 
@@ -488,6 +481,8 @@ int launcher_run(int argc, char **argv) {
     }
     printf("[launcher] retro_load_game ok\n"); fflush(stdout);
 
+    save_ram_load(&g_core, rom_path, g_root);
+
     struct retro_system_av_info av;
     memset(&av, 0, sizeof(av));
     g_core.retro_get_system_av_info(&av);
@@ -509,102 +504,4 @@ int launcher_run(int argc, char **argv) {
         video_set_scale(cli_scale);
 
     if (cli_pos_x >= 0 && cli_pos_y >= 0)
-        video_set_position(cli_pos_x, cli_pos_y);
-
-    if (cli_fullscreen)
-        video_toggle_fullscreen();
-
-    printf("[launcher] audio_init\n"); fflush(stdout);
-    if (!audio_init(av.timing.sample_rate)) {
-        pause_if_click(argc); free(rom_data);
-        if (free_core) free(core_path);
-        if (free_rom)  free(rom_path);
-        return 1;
-    }
-
-    printf("[launcher] input_init\n"); fflush(stdout);
-    if (!input_init()) {
-        pause_if_click(argc); free(rom_data);
-        if (free_core) free(core_path);
-        if (free_rom)  free(rom_path);
-        return 1;
-    }
-
-    if (g_core.retro_set_controller_port_device)
-        g_core.retro_set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
-
-    printf("[launcher] pixel format: %s\n", pixel_format_name(g_fmt));
-
-    {
-        char t[256];
-        snprintf(t, sizeof(t), "CoreNest v0.1.0 - %s - %s",
-                 sys_info.library_name ? sys_info.library_name : "core",
-                 basename_of(rom_path));
-        video_set_title(t);
-    }
-
-    printf("[launcher] entering main loop\n"); fflush(stdout);
-
-    Uint32 fps_last = SDL_GetTicks();
-    int fps_count = 0;
-    int paused = 0;
-
-    while (g_running) {
-        SDL_Event e;
-        while (SDL_PollEvent(&e)) {
-            if (e.type == SDL_QUIT) g_running = 0;
-            else if (e.type == SDL_KEYDOWN) {
-                switch (e.key.keysym.sym) {
-                case SDLK_ESCAPE: g_running = 0; break;
-                case SDLK_F11: video_toggle_fullscreen(); break;
-                case SDLK_f:   video_toggle_filter(); break;
-                case SDLK_1:   video_set_scale(1); break;
-                case SDLK_2:   video_set_scale(2); break;
-                case SDLK_3:   video_set_scale(3); break;
-                case SDLK_4:   video_set_scale(4); break;
-                case SDLK_F1:  g_core.retro_reset(); break;
-                case SDLK_p:
-                    paused = !paused;
-                    printf("[launcher] %s\n", paused ? "paused" : "resumed");
-                    fflush(stdout);
-                    break;
-                }
-            }
-        }
-
-        if (!paused) { g_core.retro_run(); fps_count++; }
-        else SDL_Delay(16);
-
-        Uint32 now = SDL_GetTicks();
-        if (now - fps_last >= 1000) {
-            char t[256];
-            snprintf(t, sizeof(t),
-                     "CoreNest v0.1.0 | %s | %d FPS | %dx%s%s",
-                     sys_info.library_name ? sys_info.library_name : "core",
-                     fps_count, video_get_scale(),
-                     video_is_fullscreen() ? " | FULL" : "",
-                     paused ? " | PAUSED" : "");
-            video_set_title(t);
-            fps_count = 0;
-            fps_last = now;
-        }
-    }
-
-    printf("[launcher] exit loop\n"); fflush(stdout);
-
-    g_core.retro_unload_game();
-    g_core.retro_deinit();
-    core_unload(&g_core);
-
-    input_deinit();
-    audio_deinit();
-    video_deinit();
-    SDL_Quit();
-
-    free(rom_data);
-    if (free_core) free(core_path);
-    if (free_rom)  free(rom_path);
-
-    printf("[launcher] done\n"); fflush(stdout);
-    return 0;
-}
+        video_set_position(cli_pos_x, cli_pos
