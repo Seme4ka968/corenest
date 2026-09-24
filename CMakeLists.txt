@@ -26,6 +26,10 @@ set(SOURCES
 
 add_executable(corenest ${SOURCES})
 
+if(WIN32)
+    target_sources(corenest PRIVATE corenest.rc)
+endif()
+
 target_link_libraries(corenest
     ${SDL2_LIBRARIES}
     mingw32
@@ -49,4 +53,12 @@ target_link_libraries(corenest
 
 if(WIN32)
     target_link_options(corenest PRIVATE -static -static-libgcc)
+endif()
+
+if(WIN32)
+    add_custom_command(TARGET corenest POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_SOURCE_DIR}/corenest.bmp
+            $<TARGET_FILE_DIR:corenest>/corenest.bmp
+    )
 endif()
