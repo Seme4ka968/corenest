@@ -267,11 +267,161 @@ int launcher_run(int argc, char **argv) {
     printf("[launcher] argc=%d\n", argc);
     fflush(stdout);
 
-    char *core_path = NULL;
+        char *core_path = NULL;
     char *rom_path  = NULL;
     int   free_core = 0;
     int   free_rom  = 0;
+    int   cli_scale = 0;       /* 0 = не задан */
+    int   cli_pos_x = -1;      /* -1 = не задан */
+    int   cli_pos_y = -1;
+    int   cli_fullscreen = 0;
+    char *cli_core = NULL;
+    char *cli_rom  = NULL;
 
+    /* --- Парсинг CLI-флагов --- */
+    for (int i = 1; i < argc; i++) {
+        const char *a = argv[i];
+
+        if (strncmp(a, "--scale=", 8) == 0) {
+            cli_scale = atoi(a + 8);
+            if (cli_scale < 1) cli_scale = 1;
+            if (cli_scale > 8) cli_scale = 8;
+        } else if (strncmp(a, "--pos=", 6) == 0) {
+            int x = -1, y = -1;
+            if (sscanf(a + 6, "%d,%d", &x, &y) == 2) {
+                cli_pos_x = x;
+                cli_pos_y = y;
+            }
+        } else if (strcmp(a, "--fullscreen") == 0 || strcmp(a, "-f") == 0) {
+            cli_fullscreen = 1;
+        } else if (strncmp(a, "--core=", 7) == 0) {
+            cli_core = dup_str(a + 7);
+        } else if (strncmp(a, "--rom=", 6) == 0) {
+            cli_rom = dup_str(a + 6);
+        } else if (a[0] != '-') {
+            /* Позиционный аргумент */
+            if (!cli_core && !core_path && file_exists(a)) {
+                if (ends_with(a, ".dll") || ends_with(a, ".so")) {
+                    cli_core = dup_str(a);
+                } else {
+                    cli_rom = dup_str(a);
+                }
+            } else if (!cli_rom) {
+                cli_rom = dup_str(a);
+            }
+        }
+    }
+
+    /* --- Выбор путей --- */
+    if (cli_core) {
+        core_path = cli_core;
+        free_core = 1;
+    }
+    if (cli_rom) {
+        rom_path = cli_rom;
+        free_rom = 1;
+    }
+
+    if (rom_path && !core_path) {
+        core_path = pick_core_for_rom(rom_path);
+        if (!core_path) {
+            core_path = find_first_or_null("cores", ".dll");
+            if (!core_path) core_path = find_first_or_null("cores", ".so");
+        }
+        free_core = 1;
+    }
+
+    if (!core_path || !rom_path) {
+        /* --- Меню (как было) --- */
+        char path[1200];
+
+        snprintf(path, sizeof(path), "%s/cores", g_root);
+        if (!dir_exists(path)) snprintf(path, sizeof(path), "cores");
+
+        int core_count = 0;
+        char **cores = list_files(path, ".dll", &core_count);
+        if (core_count == 0) {
+            free_list(cores, core_count);
+            cores = list_files(path, ".so", &core_count);
+        }
+        if (!cores || core_count == 0) {
+            fprintf(stderr, "error: no cores found in %s/\n", path);
+            pause_if_click(argc);
+            free_list(cores, core_count);
+            if (free_core) free(core_path);
+            if (free_rom)  free(rom_path);
+            return 1;
+        }
+
+        snprintf(path, sizeof(path), "%s/roms", g_root);
+        if (!dir_exists(path)) snprintf(path, sizeof(path), "roms");
+
+        const char *rom_exts[] = { ".gb", ".gbc", ".gba", ".nes", ".sfc", ".smc",
+                                   ".md", ".gen", ".sms", ".gg", ".pce" };
+        const size_t rom_exts_n = sizeof(rom_exts) / sizeof(rom_exts[0]);
+
+        char **roms = (char**)malloc(sizeof(char*) * MAX_FILES);
+        int rom_count = 0;
+        if (roms) {
+            for (size_t i = 0; i < rom_exts_n; i++) {
+                int c = 0;
+                char **tmp = list_files(path, rom_exts[i], &c);
+                for (int j = 0; j < c && rom_count < MAX_FILES; j++) {
+                    roms[rom_count++] = dup_str(tmp[j]);
+                }
+                free_list(tmp, c);
+            }
+            if (rom_count > 0) qsort(roms, rom_count, sizeof(char*), cmp_str);
+        }
+
+        if (!roms || rom_count == 0) {
+            fprintf(stderr, "error: no roms found in %s/\n", path);
+            pause_if_click(argc);
+            free_list(cores, core_count);
+            free_list(roms, rom_count);
+            if (free_core) free(core_path);
+            if (free_rom)  free(rom_path);
+            return 1;
+        }
+
+        if (rom_count == 1) {
+            rom_path  = dup_str(roms[0]);
+            free_rom  = 1;
+            core_path = pick_core_for_rom(rom_path);
+            if (!core_path) core_path = dup_str(cores[0]);
+            free_core = 1;
+        } else {
+            int idx = select_from_list("ROM Selector", roms, rom_count);
+            if (idx < 0) {
+                free_list(cores, core_count);
+                free_list(roms, rom_count);
+                if (free_core) free(core_path);
+                if (free_rom)  free(rom_path);
+                return 0;
+            }
+            rom_path  = dup_str(roms[idx]);
+            free_rom  = 1;
+            core_path = pick_core_for_rom(rom_path);
+            if (!core_path) {
+                if (core_count == 1) core_path = dup_str(cores[0]);
+                else {
+                    int cidx = select_from_list("Core Selector", cores, core_count);
+                    if (cidx < 0) {
+                        free_list(cores, core_count);
+                        free_list(roms, rom_count);
+                        if (free_core) free(core_path);
+                        if (free_rom)  free(rom_path);
+                        return 0;
+                    }
+                    core_path = dup_str(cores[cidx]);
+                }
+            }
+            free_core = 1;
+        }
+
+        free_list(cores, core_count);
+        free_list(roms, rom_count);
+    }
     if (argc >= 3) {
         core_path = dup_str(argv[1]);
         rom_path  = dup_str(argv[2]);
