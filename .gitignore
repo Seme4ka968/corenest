@@ -60,3 +60,7 @@ desktop.ini
 *.gcov
 compile_commands.json
 .cache/
+
+# --- Save folders ---
+saves/
+states/
