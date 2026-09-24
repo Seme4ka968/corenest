@@ -5,6 +5,22 @@
 static const uint8_t *g_keys = NULL;
 static SDL_GameController *g_pad = NULL;
 
+static void try_open_pad(void) {
+    if (g_pad) return;
+
+    int n = SDL_NumJoysticks();
+    for (int i = 0; i < n; i++) {
+        if (SDL_IsGameController(i)) {
+            g_pad = SDL_GameControllerOpen(i);
+            if (g_pad) {
+                printf("[input] opened controller %d: %s\n",
+                       i, SDL_GameControllerName(g_pad));
+                return;
+            }
+        }
+    }
+}
+
 bool input_init(void) {
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI, "1");
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_XBOX, "1");
@@ -30,15 +46,9 @@ bool input_init(void) {
         int is_gc = SDL_IsGameController(i);
         printf("[input]   [%d] %s (gamecontroller: %s)\n",
                i, name ? name : "?", is_gc ? "yes" : "no");
-
-        if (is_gc && !g_pad) {
-            g_pad = SDL_GameControllerOpen(i);
-            if (g_pad) {
-                printf("[input] opened controller %d: %s\n",
-                       i, SDL_GameControllerName(g_pad));
-            }
-        }
     }
+
+    try_open_pad();
 
     if (!g_pad) {
         printf("[input] no gamepad found, keyboard only\n");
@@ -65,16 +75,7 @@ void input_refresh(void) {
     int n = SDL_NumJoysticks();
     printf("[input] refresh: joysticks: %d\n", n);
 
-    for (int i = 0; i < n; i++) {
-        if (SDL_IsGameController(i)) {
-            g_pad = SDL_GameControllerOpen(i);
-            if (g_pad) {
-                printf("[input] opened controller %d: %s\n",
-                       i, SDL_GameControllerName(g_pad));
-                break;
-            }
-        }
-    }
+    try_open_pad();
 
     if (!g_pad) {
         printf("[input] no gamepad, keyboard only\n");
