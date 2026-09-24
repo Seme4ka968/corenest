@@ -11,6 +11,7 @@ static unsigned      g_tex_w = 0, g_tex_h = 0;
 static uint32_t     *g_pixels = NULL;
 static int           g_scale = 3;
 static int           g_fullscreen = 0;
+static int           g_fast_forward = 0;
 static char          g_base_title[256] = "CoreNest v0.1.0";
 
 bool video_init(unsigned width, unsigned height) {
@@ -113,6 +114,34 @@ void video_toggle_filter(void) {
             SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
             (int)g_tex_w, (int)g_tex_h);
     }
+}
+
+void video_set_fast_forward(int on) {
+    g_fast_forward = on;
+    if (g_renderer) {
+        SDL_RenderSetVSync(g_renderer, on ? 0 : 1);
+    }
+}
+
+int video_is_fast_forward(void) {
+    return g_fast_forward;
+}
+
+int video_screenshot(const char *path) {
+    if (!g_pixels || !g_tex_w || !g_tex_h || !path) return 0;
+
+    SDL_Surface *surf = SDL_CreateRGBSurfaceFrom(
+        g_pixels,
+        (int)g_tex_w, (int)g_tex_h,
+        32, (int)(g_tex_w * 4),
+        0x00FF0000, 0x0000FF00, 0x000000FF, 0xFF000000);
+
+    if (!surf) return 0;
+
+    int ok = SDL_SaveBMP(surf, path);
+    SDL_FreeSurface(surf);
+
+    return ok == 0;
 }
 
 void video_refresh(const void *data, unsigned width, unsigned height,
