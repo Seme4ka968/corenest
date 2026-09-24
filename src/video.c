@@ -9,6 +9,9 @@ static SDL_Renderer *g_renderer = NULL;
 static SDL_Texture  *g_texture = NULL;
 static unsigned      g_tex_w = 0, g_tex_h = 0;
 static uint32_t     *g_pixels = NULL;
+static int           g_scale = 3;
+static int           g_fullscreen = 0;
+static char          g_base_title[256] = "CoreNest v0.1.0";
 
 bool video_init(unsigned width, unsigned height) {
     if (SDL_InitSubSystem(SDL_INIT_VIDEO) != 0) {
@@ -16,9 +19,9 @@ bool video_init(unsigned width, unsigned height) {
         return false;
     }
 
-    g_window = SDL_CreateWindow("CoreNest",
+    g_window = SDL_CreateWindow(g_base_title,
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        (int)width * 3, (int)height * 3,
+        (int)width * g_scale, (int)height * g_scale,
         SDL_WINDOW_RESIZABLE);
 
     if (!g_window) {
@@ -37,6 +40,7 @@ bool video_init(unsigned width, unsigned height) {
     }
 
     SDL_RenderSetLogicalSize(g_renderer, (int)width, (int)height);
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
 
     g_tex_w = width;
     g_tex_h = height;
@@ -64,6 +68,48 @@ void video_deinit(void) {
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
 }
 
+void video_toggle_fullscreen(void) {
+    if (!g_window) return;
+    g_fullscreen = !g_fullscreen;
+    SDL_SetWindowFullscreen(g_window,
+        g_fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+}
+
+int video_is_fullscreen(void) {
+    return g_fullscreen;
+}
+
+void video_set_title(const char *title) {
+    if (!g_window || !title) return;
+    snprintf(g_base_title, sizeof(g_base_title), "%s", title);
+    SDL_SetWindowTitle(g_window, g_base_title);
+}
+
+void video_set_scale(int scale) {
+    if (!g_window || scale < 1) return;
+    g_scale = scale;
+    if (!g_fullscreen) {
+        SDL_SetWindowSize(g_window,
+            (int)g_tex_w * g_scale, (int)g_tex_h * g_scale);
+    }
+}
+
+int video_get_scale(void) {
+    return g_scale;
+}
+
+void video_toggle_filter(void) {
+    static int linear = 0;
+    linear = !linear;
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, linear ? "1" : "0");
+    if (g_texture) {
+        SDL_DestroyTexture(g_texture);
+        g_texture = SDL_CreateTexture(g_renderer,
+            SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
+            (int)g_tex_w, (int)g_tex_h);
+    }
+}
+
 void video_refresh(const void *data, unsigned width, unsigned height,
                    size_t pitch, enum retro_pixel_format fmt)
 {
@@ -78,6 +124,10 @@ void video_refresh(const void *data, unsigned width, unsigned height,
             SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
             (int)width, (int)height);
         SDL_RenderSetLogicalSize(g_renderer, (int)width, (int)height);
+        if (!g_fullscreen) {
+            SDL_SetWindowSize(g_window,
+                (int)width * g_scale, (int)height * g_scale);
+        }
     }
 
     const uint8_t *src = (const uint8_t*)data;
