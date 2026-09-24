@@ -6,6 +6,7 @@
 #include <string.h>
 #include <dirent.h>
 #include <ctype.h>
+#include <time.h>
 
 #include "libretro.h"
 #include "core_loader.h"
@@ -14,6 +15,18 @@
 #include "audio.h"
 #include "input.h"
 #include "save.h"
+
+#ifdef _WIN32
+  #include <direct.h>
+  #define CHDIR _chdir
+  #define MK_DIR(p) _mkdir(p)
+#else
+  #include <unistd.h>
+  #include <sys/stat.h>
+  #include <sys/types.h>
+  #define CHDIR chdir
+  #define MK_DIR(p) mkdir((p), 0755)
+#endif
 
 #define MAX_FILES 128
 
@@ -60,6 +73,11 @@ static int dir_exists(const char *path) {
     DIR *d = opendir(path);
     if (d) { closedir(d); return 1; }
     return 0;
+}
+
+static void ensure_dir(const char *path) {
+    if (dir_exists(path)) return;
+    MK_DIR(path);
 }
 
 static int file_exists(const char *path) {
@@ -173,7 +191,7 @@ static char *pick_core_for_rom(const char *rom_path) {
 static int select_from_list(const char *title, char **list, int count) {
     printf("\n");
     printf("===============================================\n");
-    printf("  CoreNest v0.1.0 - %s\n", title);
+    printf("  CoreNest v0.2.0 - %s\n", title);
     printf("===============================================\n\n");
 
     for (int i = 0; i < count; i++) {
@@ -244,7 +262,7 @@ static void find_root(void) {
 }
 
 int launcher_run(int argc, char **argv) {
-    printf("[launcher] CoreNest v0.1.0\n");
+    printf("[launcher] CoreNest v0.2.0\n");
     fflush(stdout);
 
     if (SDL_Init(SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER) != 0) {
@@ -532,7 +550,7 @@ int launcher_run(int argc, char **argv) {
 
     {
         char t[256];
-        snprintf(t, sizeof(t), "CoreNest v0.1.0 - %s - %s",
+        snprintf(t, sizeof(t), "CoreNest v0.2.0 - %s - %s",
                  sys_info.library_name ? sys_info.library_name : "core",
                  basename_of(rom_path));
         video_set_title(t);
@@ -562,6 +580,31 @@ int launcher_run(int argc, char **argv) {
                 case SDLK_F3:  save_ram_load(&g_core, rom_path, g_root); break;
                 case SDLK_F5:  save_state_save(&g_core, rom_path, g_root); break;
                 case SDLK_F8:  save_state_load(&g_core, rom_path, g_root); break;
+                case SDLK_TAB:
+                    video_set_fast_forward(!video_is_fast_forward());
+                    printf("[launcher] fast-forward: %s\n",
+                           video_is_fast_forward() ? "on" : "off");
+                    fflush(stdout);
+                    break;
+                case SDLK_F12: {
+                    char sd[1200];
+                    snprintf(sd, sizeof(sd), "%s/screenshots", g_root);
+                    ensure_dir(sd);
+
+                    time_t t = time(NULL);
+                    struct tm *tmv = localtime(&t);
+                    char fn[1400];
+                    snprintf(fn, sizeof(fn),
+                             "%s/corenest_%04d%02d%02d_%02d%02d%02d.bmp",
+                             sd,
+                             tmv->tm_year + 1900, tmv->tm_mon + 1, tmv->tm_mday,
+                             tmv->tm_hour, tmv->tm_min, tmv->tm_sec);
+                    if (video_screenshot(fn))
+                        printf("[launcher] screenshot: %s\n", fn);
+                    else
+                        fprintf(stderr, "[launcher] screenshot failed\n");
+                    fflush(stdout);
+                } break;
                 case SDLK_p:
                     paused = !paused;
                     printf("[launcher] %s\n", paused ? "paused" : "resumed");
@@ -578,11 +621,12 @@ int launcher_run(int argc, char **argv) {
         if (now - fps_last >= 1000) {
             char t[256];
             snprintf(t, sizeof(t),
-                     "CoreNest v0.1.0 | %s | %d FPS | %dx%s%s",
+                     "CoreNest v0.2.0 | %s | %d FPS | %dx%s%s%s",
                      sys_info.library_name ? sys_info.library_name : "core",
                      fps_count, video_get_scale(),
                      video_is_fullscreen() ? " | FULL" : "",
-                     paused ? " | PAUSED" : "");
+                     paused ? " | PAUSED" : "",
+                     video_is_fast_forward() ? " | FF" : "");
             video_set_title(t);
             fps_count = 0;
             fps_last = now;
