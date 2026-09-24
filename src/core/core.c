@@ -35,7 +35,7 @@ static void *load_symbol(void *handle, const char *name) {
 }
 
 #define LOAD_REQUIRED(field, symbol) do { \
-    out->field = (void *)load_symbol(out->handle, symbol); \
+    *(void **)(&(out->field)) = load_symbol(out->handle, symbol); \
     if (!out->field) goto fail; \
 } while (0)
 
